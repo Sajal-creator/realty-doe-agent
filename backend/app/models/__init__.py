@@ -12,6 +12,7 @@ from .ticket import SupportTicket, TicketCategory, TicketPriority, TicketStatus
 from .appointment import Appointment, AppointmentType, AppointmentStatus
 from .notification import Notification, NotificationType
 from .property_listing import PropertyListing, PropertyStatus
+from .faq import FAQEntry
 
 __all__ = [
     # Base
@@ -50,4 +51,6 @@ __all__ = [
     # Property Listing
     "PropertyListing",
     "PropertyStatus",
+    # FAQ
+    "FAQEntry",
 ]

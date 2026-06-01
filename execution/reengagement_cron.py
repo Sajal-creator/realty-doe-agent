@@ -8,7 +8,7 @@ and sends them via WhatsApp to re-engage cold leads.
 import asyncio
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import IntEnum
 from typing import Any
 
@@ -106,7 +106,7 @@ class ReengagementCron:
         Find leads with no inbound or outbound activity in the last 72 hours.
         Excludes leads already in active nurture sequences.
         """
-        cutoff = datetime.utcnow() - timedelta(hours=72)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=72)
 
         # Query leads with last_activity < cutoff
         # and not opted out and not currently in human takeover

@@ -13,12 +13,12 @@ logger = structlog.get_logger(__name__)
 
 
 def _get_session_factory():
-    from database.session import async_session_factory
+    from app.database.session import async_session_factory
     return async_session_factory
 
 
 def _get_models():
-    from database.models import Notification
+    from app.models.notification import Notification
     return Notification
 
 

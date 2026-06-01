@@ -15,15 +15,17 @@ logger = structlog.get_logger(__name__)
 # Import models - these will be defined in the models layer
 # Using string references to avoid circular imports at module level
 def _get_session_factory():
-    from database.session import async_session_factory
+    from app.database.session import async_session_factory
     return async_session_factory
 
 
 def _get_models():
-    from database.models import (
-        Lead, ConversationSession, Message, QualificationMatrix, Notification,
-    )
-    return Lead, ConversationSession, Message, QualificationMatrix, Notification
+    from app.models.lead import Lead, LeadSource, LeadStage, WarmthTier
+    from app.models.session import Session as ConversationSession
+    from app.models.message import Message
+    from app.models.notification import Notification
+    # QualificationMatrix is stored as JSON on Lead.qualification — no separate model
+    return Lead, ConversationSession, Message, None, Notification
 
 
 # ─── Lead CRUD ───────────────────────────────────────────────────────────────
@@ -32,25 +34,41 @@ def _get_models():
 async def create_lead(data: dict[str, Any]) -> dict:
     """Create a new lead record."""
     Lead, *_ = _get_models()
+    from app.models.lead import LeadSource, LeadStage, WarmthTier
+
+    # Map source string to enum
+    source_str = data.get("source", "ORGANIC").upper()
+    try:
+        source = LeadSource(source_str)
+    except ValueError:
+        source = LeadSource.ORGANIC
+
+    # Map stage/status string to enum
+    stage_str = data.get("stage", data.get("status", "DISCOVERY")).upper()
+    try:
+        lead_stage = LeadStage(stage_str)
+    except ValueError:
+        lead_stage = LeadStage.DISCOVERY
+
     async with _get_session_factory()() as session:
         lead = Lead(
-            id=str(uuid.uuid4()),
+            id=uuid.uuid4(),
             name=data.get("name"),
             phone=data.get("phone"),
             email=data.get("email"),
-            source=data.get("source", "whatsapp"),
-            status=data.get("status", "new"),
-            agent_id=data.get("agent_id"),
+            source=source,
+            lead_stage=lead_stage,
+            assigned_agent_id=data.get("agent_id"),  # UUID or None
             preferences=data.get("preferences", {}),
-            metadata=data.get("metadata", {}),
-            warmth_score=0.0,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            qualification=data.get("qualification", {}),
+            warmth_score=0,
+            warmth_tier=WarmthTier.COLD,
+            role=data.get("role", "buyer"),
         )
         session.add(lead)
         await session.commit()
         await session.refresh(lead)
-        logger.info("lead_created", lead_id=lead.id, phone=data.get("phone"))
+        logger.info("lead_created", lead_id=str(lead.id), phone=data.get("phone"))
         return _lead_to_dict(lead)
 
 
@@ -75,10 +93,34 @@ async def get_lead_by_phone(phone: str) -> Optional[dict]:
 async def update_lead(lead_id: str, data: dict[str, Any]) -> Optional[dict]:
     """Update lead fields."""
     Lead, *_ = _get_models()
-    data["updated_at"] = datetime.now(timezone.utc)
+    from app.models.lead import LeadStage, LeadSource
+
+    # Map common aliases to ORM field names
+    mapped = {}
+    for k, v in data.items():
+        if k == "status" and isinstance(v, str):
+            try:
+                mapped["lead_stage"] = LeadStage(v.upper())
+            except ValueError:
+                mapped["lead_stage"] = LeadStage.DISCOVERY
+        elif k == "agent_id":
+            mapped["assigned_agent_id"] = v
+        elif k == "stage" and isinstance(v, str):
+            try:
+                mapped["lead_stage"] = LeadStage(v.upper())
+            except ValueError:
+                mapped["lead_stage"] = LeadStage.DISCOVERY
+        elif k == "source" and isinstance(v, str):
+            try:
+                mapped["source"] = LeadSource(v.upper())
+            except ValueError:
+                pass
+        else:
+            mapped[k] = v
+
     async with _get_session_factory()() as session:
         await session.execute(
-            update(Lead).where(Lead.id == lead_id).values(**data)
+            update(Lead).where(Lead.id == lead_id).values(**mapped)
         )
         await session.commit()
         return await get_lead(lead_id)
@@ -177,43 +219,40 @@ async def get_messages(session_id: str, limit: int = 50) -> list[dict]:
 
 
 async def update_qualification(lead_id: str, matrix_data: dict) -> dict:
-    """Create or update qualification matrix for a lead."""
-    _, _, _, QualificationMatrix, _ = _get_models()
+    """Create or update qualification matrix for a lead.
+
+    Qualification is stored as JSON on Lead.qualification.
+    """
+    Lead, *_ = _get_models()
     async with _get_session_factory()() as session:
         result = await session.execute(
-            select(QualificationMatrix).where(QualificationMatrix.lead_id == lead_id)
+            select(Lead).where(Lead.id == lead_id)
         )
-        existing = result.scalar_one_or_none()
-        if existing:
-            for k, v in matrix_data.items():
-                setattr(existing, k, v)
-            existing.updated_at = datetime.now(timezone.utc)
-            await session.commit()
-            await session.refresh(existing)
-            return _qual_to_dict(existing)
-        else:
-            qm = QualificationMatrix(
-                id=str(uuid.uuid4()),
-                lead_id=lead_id,
-                **matrix_data,
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-            )
-            session.add(qm)
-            await session.commit()
-            await session.refresh(qm)
-            return _qual_to_dict(qm)
+        lead = result.scalar_one_or_none()
+        if not lead:
+            return {"error": "lead not found", "lead_id": lead_id}
+
+        # Merge with existing qualification data
+        existing = lead.qualification or {}
+        existing.update(matrix_data)
+        lead.qualification = existing
+        await session.commit()
+        await session.refresh(lead)
+        logger.info("qualification_updated", lead_id=lead_id, fields=list(matrix_data.keys()))
+        return {"lead_id": lead_id, "qualification": lead.qualification}
 
 
 async def get_qualification(lead_id: str) -> Optional[dict]:
     """Get qualification matrix for a lead."""
-    _, _, _, QualificationMatrix, _ = _get_models()
+    Lead, *_ = _get_models()
     async with _get_session_factory()() as session:
         result = await session.execute(
-            select(QualificationMatrix).where(QualificationMatrix.lead_id == lead_id)
+            select(Lead).where(Lead.id == lead_id)
         )
-        qm = result.scalar_one_or_none()
-        return _qual_to_dict(qm) if qm else None
+        lead = result.scalar_one_or_none()
+        if not lead or not lead.qualification:
+            return None
+        return {"lead_id": lead_id, "qualification": lead.qualification}
 
 
 # ─── Warmth & Timeline ──────────────────────────────────────────────────────
@@ -271,9 +310,14 @@ async def search_leads(
             )
         if filters:
             if "status" in filters:
-                stmt = stmt.where(Lead.status == filters["status"])
+                from app.models.lead import LeadStage
+                try:
+                    stage = LeadStage(filters["status"].upper())
+                    stmt = stmt.where(Lead.lead_stage == stage)
+                except ValueError:
+                    pass
             if "agent_id" in filters:
-                stmt = stmt.where(Lead.agent_id == filters["agent_id"])
+                stmt = stmt.where(Lead.assigned_agent_id == filters["agent_id"])
             if "min_warmth" in filters:
                 stmt = stmt.where(Lead.warmth_score >= filters["min_warmth"])
         stmt = stmt.order_by(Lead.updated_at.desc()).limit(filters.get("limit", 50) if filters else 50)
@@ -284,11 +328,16 @@ async def search_leads(
 async def get_pipeline_leads(agent_id: str) -> list[dict]:
     """Get all active leads in an agent's pipeline."""
     Lead, *_ = _get_models()
+    from app.models.lead import LeadStage
+    active_stages = [
+        LeadStage.DISCOVERY, LeadStage.QUALIFYING, LeadStage.QUALIFIED,
+        LeadStage.BROWSING, LeadStage.VIEWING_SCHEDULED,
+    ]
     async with _get_session_factory()() as session:
         result = await session.execute(
             select(Lead)
-            .where(Lead.agent_id == agent_id)
-            .where(Lead.status.in_(["new", "contacted", "qualified", "negotiating"]))
+            .where(Lead.assigned_agent_id == agent_id)
+            .where(Lead.lead_stage.in_(active_stages))
             .order_by(Lead.warmth_score.desc())
         )
         return [_lead_to_dict(l) for l in result.scalars().all()]
@@ -299,18 +348,23 @@ async def get_pipeline_leads(agent_id: str) -> list[dict]:
 
 def _lead_to_dict(lead) -> dict:
     return {
-        "id": lead.id,
+        "id": str(lead.id),
         "name": lead.name,
         "phone": lead.phone,
         "email": lead.email,
-        "source": lead.source,
-        "status": lead.status,
-        "agent_id": lead.agent_id,
-        "preferences": lead.preferences if hasattr(lead, "preferences") else {},
-        "metadata": lead.metadata if hasattr(lead, "metadata") else {},
-        "warmth_score": float(lead.warmth_score) if lead.warmth_score else 0.0,
+        "source": lead.source.value if hasattr(lead.source, "value") else lead.source,
+        "status": lead.lead_stage.value if hasattr(lead.lead_stage, "value") else str(lead.lead_stage),
+        "lead_stage": lead.lead_stage.value if hasattr(lead.lead_stage, "value") else str(lead.lead_stage),
+        "agent_id": str(lead.assigned_agent_id) if lead.assigned_agent_id else None,
+        "assigned_agent_id": str(lead.assigned_agent_id) if lead.assigned_agent_id else None,
+        "preferences": lead.preferences if hasattr(lead, "preferences") and lead.preferences else {},
+        "qualification": lead.qualification if hasattr(lead, "qualification") and lead.qualification else {},
+        "warmth_score": int(lead.warmth_score) if lead.warmth_score else 0,
+        "warmth_tier": lead.warmth_tier.value if hasattr(lead, "warmth_tier") and hasattr(lead.warmth_tier, "value") else "COLD",
+        "role": lead.role.value if hasattr(lead, "role") and hasattr(lead.role, "value") else "buyer",
         "created_at": lead.created_at.isoformat() if lead.created_at else None,
         "updated_at": lead.updated_at.isoformat() if lead.updated_at else None,
+        "last_activity_at": lead.last_activity_at.isoformat() if hasattr(lead, "last_activity_at") and lead.last_activity_at else None,
     }
 
 
@@ -336,9 +390,23 @@ def _message_to_dict(msg) -> dict:
 
 
 def _qual_to_dict(qm) -> dict:
+    """Convert qualification data to dict. Works with both Lead.qualification JSON and legacy models."""
+    if isinstance(qm, dict):
+        return qm
     return {
-        "id": qm.id,
-        "lead_id": qm.lead_id,
-        "created_at": qm.created_at.isoformat() if qm.created_at else None,
-        "updated_at": qm.updated_at.isoformat() if qm.updated_at else None,
+        "id": str(qm.id) if hasattr(qm, "id") else None,
+        "lead_id": str(qm.lead_id) if hasattr(qm, "lead_id") else None,
+        "budget_min": getattr(qm, "budget_min", None),
+        "budget_max": getattr(qm, "budget_max", None),
+        "timeline_days": getattr(qm, "timeline_days", None),
+        "financial_readiness": getattr(qm, "financial_readiness", None),
+        "property_type": getattr(qm, "property_type", None),
+        "location_preferences": getattr(qm, "location_preferences", None),
+        "bedrooms_min": getattr(qm, "bedrooms_min", None),
+        "bathrooms_min": getattr(qm, "bathrooms_min", None),
+        "must_haves": getattr(qm, "must_haves", None),
+        "nice_to_haves": getattr(qm, "nice_to_haves", None),
+        "deal_breakers": getattr(qm, "deal_breakers", None),
+        "created_at": qm.created_at.isoformat() if hasattr(qm, "created_at") and qm.created_at else None,
+        "updated_at": qm.updated_at.isoformat() if hasattr(qm, "updated_at") and qm.updated_at else None,
     }

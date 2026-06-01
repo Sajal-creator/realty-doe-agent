@@ -19,17 +19,17 @@ PAGE_SIZE = 100
 
 
 def _get_session_factory():
-    from database.session import async_session_factory
+    from app.database.session import async_session_factory
     return async_session_factory
 
 
-def _get_listing_model():
-    from database.models import PropertyListing
+def _get_models():
+    from app.models.property_listing import PropertyListing
     return PropertyListing
 
 
 def _get_lead_model():
-    from database.models import Lead
+    from app.models.lead import Lead
     return Lead
 
 
@@ -168,7 +168,7 @@ async def _get_listing_embedding(listing: dict) -> list[float]:
 
 async def sync_listings_to_db(listings: list[dict]) -> dict:
     """Upsert listings to database with vector embeddings."""
-    PropertyListing = _get_listing_model()
+    PropertyListing = _get_models()
     created = 0
     updated = 0
     errors = 0
@@ -232,7 +232,7 @@ async def sync_listings_to_db(listings: list[dict]) -> dict:
 
 async def match_listings_to_leads(listing: dict) -> list[dict]:
     """Find leads whose preferences match a new listing."""
-    PropertyListing = _get_listing_model()
+    PropertyListing = _get_models()
     Lead = _get_lead_model()
 
     listing_embedding = await _get_listing_embedding(listing)

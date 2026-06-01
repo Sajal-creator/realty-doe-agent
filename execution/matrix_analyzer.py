@@ -293,10 +293,19 @@ class MatrixAnalyzer:
                 # Check if existing value has a stored confidence
                 existing_conf_key = f"{field}_confidence"
                 old_conf = existing.get(existing_conf_key, 1.0)
-                # Only overwrite if new confidence is high enough
+                # Skip if new confidence below threshold AND existing data exists
                 if new_conf < OVERWRITE_CONFIDENCE_THRESHOLD and field in merged:
                     logger.debug(
                         "matrix.skip_field",
+                        field=field,
+                        new_conf=new_conf,
+                        old_conf=old_conf,
+                    )
+                    continue
+                # Skip if existing has higher confidence (don't downgrade)
+                if field in merged and old_conf > new_conf:
+                    logger.debug(
+                        "matrix.skip_lower_confidence",
                         field=field,
                         new_conf=new_conf,
                         old_conf=old_conf,

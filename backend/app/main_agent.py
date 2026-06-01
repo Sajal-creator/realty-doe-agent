@@ -63,6 +63,15 @@ async def lifespan(app: FastAPI):
 
     logger.info("🚀 Starting %s (%s)", settings.APP_NAME, settings.APP_ENV)
 
+    # Database
+    logger.info("Connecting to database …")
+    try:
+        from app.database.session import init_db
+        await init_db()
+        logger.info("✅ Database connected & tables ensured")
+    except Exception as exc:
+        logger.error("❌ Database init failed: %s", exc)
+
     # Redis
     logger.info("Connecting to Redis …")
     redis_pool = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -75,12 +84,12 @@ async def lifespan(app: FastAPI):
 
     # Orchestrator (lazy import to avoid circular deps)
     try:
-        from app.orchestrator import Orchestrator
-        orchestrator = Orchestrator(redis=redis_pool, settings=settings)
+        from orchestration.orchestrator import OrchestratorEngine
+        orchestrator = OrchestratorEngine(redis=redis_pool, settings=settings)
         await orchestrator.initialise()
         logger.info("✅ Orchestrator initialised")
-    except ImportError:
-        logger.warning("⚠️  Orchestrator module not found – skipping")
+    except ImportError as exc:
+        logger.warning("⚠️  Orchestrator module not found – skipping: %s", exc)
     except Exception as exc:
         logger.error("❌ Orchestrator init failed: %s", exc)
 
@@ -219,15 +228,25 @@ async def _setup_websocket():
         logger.error("❌ WebSocket setup failed: %s", exc)
 
 
-# ── Graceful signal handling ──────────────────────────────────────
-def _handle_signal(sig):
-    logger.info("Received signal %s – shutting down", sig.name)
-    scheduler.shutdown(wait=False)
-    sys.exit(0)
+# ── Graceful signal handling (async-safe) ─────────────────────────
+def _setup_signal_handlers(loop: asyncio.AbstractEventLoop):
+    """Register async-safe signal handlers on the event loop."""
+    import functools
 
+    async def _shutdown(sig):
+        logger.info("Received signal %s – shutting down", sig.name)
+        scheduler.shutdown(wait=False)
+        if orchestrator:
+            await orchestrator.shutdown()
+        if redis_pool:
+            await redis_pool.close()
+        loop.stop()
 
-for _sig in (signal.SIGINT, signal.SIGTERM):
-    signal.signal(_sig, _handle_signal)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(
+            sig,
+            functools.partial(asyncio.ensure_future, _shutdown(sig)),
+        )
 
 
 # ── Entry point ───────────────────────────────────────────────────

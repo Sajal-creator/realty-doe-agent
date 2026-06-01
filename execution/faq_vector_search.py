@@ -19,12 +19,12 @@ DOMAINS = ("buying", "selling", "neighborhoods", "legal", "general")
 
 
 def _get_session_factory():
-    from database.session import async_session_factory
+    from app.database.session import async_session_factory
     return async_session_factory
 
 
-def _get_faq_model():
-    from database.models import FAQEntry
+def _get_models():
+    from app.models.faq import FAQEntry
     return FAQEntry
 
 
@@ -45,7 +45,7 @@ async def index_faq(qa_pairs: list[dict[str, Any]]) -> list[dict]:
     Args:
         qa_pairs: List of dicts with 'question', 'answer', and optional 'domain'.
     """
-    FAQEntry = _get_faq_model()
+    FAQEntry = _get_models()
     results = []
 
     async with _get_session_factory()() as session:
@@ -67,13 +67,11 @@ async def index_faq(qa_pairs: list[dict[str, Any]]) -> list[dict]:
                 continue
 
             entry = FAQEntry(
-                id=str(uuid.uuid4()),
+                id=uuid.uuid4(),
                 question=question,
                 answer=answer,
                 domain=domain,
                 embedding=embedding,
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
             )
             session.add(entry)
             results.append({"id": entry.id, "question": question, "domain": domain})
@@ -101,7 +99,7 @@ async def search_faq(
         logger.error("faq_search_embedding_failed", error=str(e))
         return {"results": [], "recommend_escalation": True, "reason": "embedding_failed"}
 
-    FAQEntry = _get_faq_model()
+    FAQEntry = _get_models()
     async with _get_session_factory()() as session:
         # Use pgvector cosine distance for similarity search
         from sqlalchemy import text

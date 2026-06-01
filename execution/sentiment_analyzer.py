@@ -12,6 +12,16 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = structlog.get_logger(__name__)
 
+# Cached OpenAI client (avoids re-creating per call)
+_openai_client: openai.AsyncOpenAI | None = None
+
+
+def _get_openai_client() -> openai.AsyncOpenAI:
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = openai.AsyncOpenAI()
+    return _openai_client
+
 URGENCY_PATTERNS = [
     r"\bpre[- ]?approved\b",
     r"\bcash\s*(ready|buyer|on hand)\b",
@@ -89,7 +99,7 @@ async def analyze_sentiment(text: str) -> SentimentResult:
         return SentimentResult(score=0.0, label="NEUTRAL", confidence=1.0)
 
     try:
-        client = openai.AsyncOpenAI()
+        client = _get_openai_client()
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0,

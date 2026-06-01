@@ -411,6 +411,9 @@ class VectorMLSMatcher:
             return []
 
         embedding_str = row["embedding"]
+        if not embedding_str:
+            logger.warning("vector.no_embedding", property_id=property_id)
+            return []
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(
