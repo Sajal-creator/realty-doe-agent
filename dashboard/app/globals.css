@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ─────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --color-hot: 16 185 129;
+    --color-warm: 245 158 11;
+    --color-cold: 59 130 246;
+    --color-new: 139 92 246;
+  }
+
+  body {
+    @apply bg-slate-950 text-gray-100 antialiased;
+  }
+
+  * {
+    @apply border-slate-800;
+  }
+}
+
+/* ── Custom Scrollbars ────────────────────────────────── */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.3) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(100, 116, 139, 0.3);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(100, 116, 139, 0.5);
+  }
+
+  .scrollbar-hidden {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ── Message Bubbles ──────────────────────────────────── */
+@layer components {
+  .message-bubble {
+    @apply relative max-w-[80%] rounded-2xl px-4 py-2.5 text-sm;
+  }
+
+  .message-bubble-incoming {
+    @apply message-bubble rounded-bl-sm bg-slate-800 text-gray-100;
+  }
+
+  .message-bubble-outgoing {
+    @apply message-bubble rounded-br-sm bg-emerald-600/90 text-white ml-auto;
+  }
+
+  .message-bubble-system {
+    @apply message-bubble mx-auto max-w-full rounded-lg bg-slate-800/50
+           text-center text-xs text-gray-400 italic;
+  }
+
+  /* Tail connector triangles */
+  .message-bubble-incoming::before {
+    content: "";
+    @apply absolute -bottom-0 left-0 h-3 w-3 bg-slate-800;
+    clip-path: polygon(0 0, 100% 0, 0 100%);
+  }
+
+  .message-bubble-outgoing::before {
+    content: "";
+    @apply absolute -bottom-0 right-0 h-3 w-3 bg-emerald-600/90;
+    clip-path: polygon(100% 0, 100% 100%, 0 0);
+  }
+
+  /* Typing indicator dots */
+  .typing-dots span {
+    @apply inline-block h-2 w-2 rounded-full bg-gray-400;
+    animation: typing-dot 1.4s infinite ease-in-out;
+  }
+
+  .typing-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .typing-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+}
+
+/* ── Warmth Badges ────────────────────────────────────── */
+@layer components {
+  .badge-hot {
+    @apply bg-emerald-500/20 text-emerald-400 border border-emerald-500/30;
+  }
+
+  .badge-warm {
+    @apply bg-amber-500/20 text-amber-400 border border-amber-500/30;
+  }
+
+  .badge-cold {
+    @apply bg-blue-500/20 text-blue-400 border border-blue-500/30;
+  }
+
+  .badge-new {
+    @apply bg-violet-500/20 text-violet-400 border border-violet-500/30;
+  }
+}
+
+/* ── Pipeline Cards ───────────────────────────────────── */
+@layer components {
+  .pipeline-card {
+    @apply rounded-lg border border-slate-700/50 bg-slate-800/60 p-3
+           transition-all duration-200 hover:border-slate-600 hover:bg-slate-800
+           cursor-pointer;
+  }
+
+  .pipeline-card.is-selected {
+    @apply border-brand/50 ring-1 ring-brand/20;
+  }
+
+  .pipeline-card.is-dragging {
+    @apply opacity-50 rotate-2 scale-105;
+  }
+}
+
+/* ── Glass Panels ─────────────────────────────────────── */
+@layer components {
+  .glass-panel {
+    @apply rounded-xl border border-slate-700/50 bg-slate-900/80 backdrop-blur-sm;
+  }
+}
+
+/* ── Map Overrides ────────────────────────────────────── */
+.mapboxgl-ctrl-top-right .mapboxgl-ctrl {
+  @apply !bg-slate-800 !border-slate-700;
+}
+
+.mapboxgl-ctrl-group button + button {
+  @apply !border-slate-700;
+}
+
+.mapboxgl-popup-content {
+  @apply !bg-slate-800 !text-gray-100 !rounded-lg !shadow-xl !border !border-slate-700;
+}
+
+.mapboxgl-popup-tip {
+  @apply !border-t-slate-800;
+}
